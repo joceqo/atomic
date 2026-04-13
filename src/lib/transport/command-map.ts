@@ -549,6 +549,12 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
     method: 'GET',
     path: (a) => `/api/link-preview?url=${encodeURIComponent(a.url as string)}`,
   },
+  get_link_preview_proxy_image: {
+    method: 'GET',
+    path: (a) =>
+      `/api/link-preview/proxy-image?url=${encodeURIComponent(a.imageUrl as string)}&referer=${encodeURIComponent(a.refererUrl as string)}`,
+    transformResponse: (d: unknown) => d,
+  },
   enqueue_link_screenshot: {
     method: 'POST',
     path: '/api/link-preview/screenshot',

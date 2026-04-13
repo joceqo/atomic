@@ -220,8 +220,12 @@ export class HttpTransport implements Transport {
 
     const contentType = resp.headers.get('content-type') ?? '';
 
-    // Some endpoints return binary bodies (e.g. screenshot images)
-    if (contentType.startsWith('image/')) {
+    // Binary image bodies (og proxy may use image/* or application/octet-stream)
+    if (
+      contentType.startsWith('image/')
+      || path.includes('/link-preview/proxy-image')
+      || path.includes('/link-preview/screenshot/')
+    ) {
       return (await resp.blob()) as T;
     }
 

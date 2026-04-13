@@ -265,6 +265,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     // Link preview (server-side metadata + queued screenshots)
     cfg.route("/link-preview", web::get().to(link_preview::get_link_preview));
     cfg.route(
+        "/link-preview/proxy-image",
+        web::get().to(link_preview::get_link_preview_proxy_image),
+    );
+    cfg.route(
         "/link-preview/screenshot",
         web::post().to(link_preview::enqueue_link_preview_screenshot),
     );

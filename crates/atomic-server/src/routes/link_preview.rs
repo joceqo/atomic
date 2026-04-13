@@ -13,6 +13,14 @@ pub struct LinkPreviewQuery {
     pub url: String,
 }
 
+#[derive(Deserialize)]
+pub struct LinkPreviewProxyImageQuery {
+    /// Absolute image URL (typically og:image).
+    pub url: String,
+    /// Page URL the preview is for; sent as Referer when fetching the image (hotlink protection).
+    pub referer: String,
+}
+
 #[derive(Serialize)]
 pub struct LinkPreviewResponse {
     pub url: String,
@@ -45,6 +53,107 @@ pub async fn get_link_preview(query: web::Query<LinkPreviewQuery>) -> HttpRespon
         Ok(preview) => HttpResponse::Ok().json(preview),
         Err(error) => HttpResponse::BadGateway().json(serde_json::json!({ "error": error })),
     }
+}
+
+pub async fn get_link_preview_proxy_image(query: web::Query<LinkPreviewProxyImageQuery>) -> HttpResponse {
+    let image_url = match Url::parse(&query.url) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "error": "Invalid image URL" }));
+        }
+    };
+    let referer_url = match Url::parse(&query.referer) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "error": "Invalid referer URL" }));
+        }
+    };
+
+    if !matches!(image_url.scheme(), "http" | "https")
+        || !matches!(referer_url.scheme(), "http" | "https")
+    {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "error": "Only http/https URLs are allowed" }));
+    }
+
+    if let Some(h) = image_url.host_str() {
+        if is_forbidden_host(h) {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "error": "Image host is not allowed" }));
+        }
+    }
+    if let Some(h) = referer_url.host_str() {
+        if is_forbidden_host(h) {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "error": "Referer host is not allowed" }));
+        }
+    }
+
+    if !preview_image_host_allowed(&referer_url, &image_url) {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Image host does not match preview page host"
+        }));
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to build proxy image HTTP client");
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    let response = match client
+        .get(image_url.clone())
+        .header(
+            reqwest::header::USER_AGENT,
+            "AtomicLinkPreview/1.0 (+https://github.com/kenforthewin/atomic)",
+        )
+        .header(reqwest::header::REFERER, referer_url.as_str())
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(error = %e, "proxy image fetch failed");
+            return HttpResponse::BadGateway().json(serde_json::json!({ "error": "Failed to fetch image" }));
+        }
+    };
+
+    if !response.status().is_success() {
+        return HttpResponse::BadGateway().json(serde_json::json!({
+            "error": format!("Image URL returned {}", response.status())
+        }));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .split(';')
+        .next()
+        .unwrap_or("application/octet-stream")
+        .trim()
+        .to_string();
+
+    let bytes = match response.bytes().await {
+        Ok(b) => b,
+        Err(_) => {
+            return HttpResponse::BadGateway().json(serde_json::json!({ "error": "Failed to read image body" }));
+        }
+    };
+
+    // Basic size cap (avoid huge payloads in memory)
+    const MAX_BYTES: usize = 6 * 1024 * 1024;
+    if bytes.len() > MAX_BYTES {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "error": "Image too large" }));
+    }
+
+    HttpResponse::Ok()
+        .content_type(content_type)
+        .body(bytes.to_vec())
 }
 
 pub async fn enqueue_link_preview_screenshot(
@@ -140,6 +249,31 @@ fn first_text(document: &Html, selector: &str) -> Option<String> {
         .next()
         .map(|el| el.text().collect::<String>().trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Allow proxying only when image and page look like the same site (same host or same last-two DNS labels).
+fn preview_image_host_allowed(referer: &Url, image: &Url) -> bool {
+    let Some(rh) = referer.host_str() else {
+        return false;
+    };
+    let Some(ih) = image.host_str() else {
+        return false;
+    };
+    let r = rh.trim_end_matches('.').to_ascii_lowercase();
+    let i = ih.trim_end_matches('.').to_ascii_lowercase();
+    if r == i {
+        return true;
+    }
+    let r_labels: Vec<&str> = r.split('.').collect();
+    let i_labels: Vec<&str> = i.split('.').collect();
+    if r_labels.len() >= 2 && i_labels.len() >= 2 {
+        let r_root = format!("{}.{}", r_labels[r_labels.len() - 2], r_labels[r_labels.len() - 1]);
+        let i_root = format!("{}.{}", i_labels[i_labels.len() - 2], i_labels[i_labels.len() - 1]);
+        if r_root == i_root {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_forbidden_host(host: &str) -> bool {
