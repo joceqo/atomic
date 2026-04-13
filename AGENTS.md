@@ -201,3 +201,34 @@ Computed from sqlite-vec's Euclidean distance on normalized vectors: `similarity
 Dark theme (Obsidian-inspired). Backgrounds: `#1e1e1e`/`#252525`/`#2d2d2d`. Accent: purple (`#7c3aed`). Three-panel layout: fixed-width left panel (tag tree, navigation), flexible main view (canvas/grid/list), overlay right drawer (editor, viewer, wiki, chat).
 
 Frontend state is managed by Zustand stores: `atoms`, `tags`, `ui`, `settings`, `wiki`, `chat`, `databases`. The `ui` store tracks selected tag filter, drawer state, view mode, and search query. View mode (canvas/grid/list) persists to localStorage.
+
+## Cursor Cloud specific instructions
+
+### System dependencies (pre-installed in snapshot)
+
+- **mold** linker — required by `.cargo/config.toml` for Linux builds
+- **Tauri v2 system libraries** — `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `patchelf`, `libssl-dev`
+- **Node.js 24** (LTS Krypton) via nvm — matches `.nvmrc`
+- **Rust stable** (latest) via rustup
+
+### Running the dev environment
+
+Use `npm run dev:server` to start both the Rust API server (port 8080) and the Vite frontend (port 1420) concurrently. The Vite dev server runs in web mode (`VITE_BUILD_TARGET=web`) with proxy rules forwarding `/api`, `/health`, `/ws` to the backend.
+
+### Gotchas
+
+- **Onboarding wizard blocks UI access** unless an AI provider is configured. To bypass without a real AI key, set the provider to Ollama via the settings API:
+  ```bash
+  TOKEN="<your-token>"
+  curl -X PUT http://localhost:8080/api/settings/provider -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"value":"ollama"}'
+  curl -X PUT http://localhost:8080/api/settings/ollama_host -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"value":"http://127.0.0.1:11434"}'
+  ```
+  This makes `verify_provider_configured` return `true`. Embedding/tagging will fail (no Ollama running), but CRUD and UI work fine.
+
+- **`cargo check` for the full workspace fails** because `src-tauri` expects pre-built sidecar binaries (`binaries/atomic-server-x86_64-unknown-linux-gnu`). Use `cargo check -p atomic-core -p atomic-server -p atomic-mcp-bridge` to check the core crates, or run `npm run build:server` first to build the sidecar binaries.
+
+- **`atomic-server` integration test `api_atoms.rs`** has a pre-existing compilation error (missing `log_buffer` field in `AppState` initializer). Use `cargo test -p atomic-core` for reliable test runs.
+
+- **API tokens**: On first server start, no tokens exist. Create one with `cargo run -p atomic-server -- token create --name default` or via the REST API `/api/auth/tokens`. The settings API body format is `{"value": "<string>"}`.
+
+- **No ESLint config** — frontend linting is TypeScript-only via `npx tsc --noEmit`.
