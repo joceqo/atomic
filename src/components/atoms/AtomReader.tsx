@@ -9,6 +9,7 @@ import { Modal } from '../ui/Modal';
 import { SearchBar } from '../ui/SearchBar';
 import { Input } from '../ui/Input';
 import { MarkdownImage } from '../ui/MarkdownImage';
+import { LinkPreview } from '../ui/LinkPreview';
 import { TagChip } from '../tags/TagChip';
 import { TagSelector } from '../tags/TagSelector';
 import { MiniGraphPreview } from '../canvas/MiniGraphPreview';
@@ -350,11 +351,7 @@ function AtomReaderContent({
       if (childArray.some((c: any) => c?.type === MarkdownImage || c?.props?.src)) {
         return <>{children}</>;
       }
-      return (
-        <a href={href} onClick={(e) => { e.preventDefault(); if (href) openExternalUrl(href).catch(console.error); }} className="cursor-pointer">
-          {wrapWithHighlight(children)}
-        </a>
-      );
+      return <LinkPreview url={href}>{wrapWithHighlight(children)}</LinkPreview>;
     },
     img: ({ src, alt }: { src?: string; alt?: string }) => <MarkdownImage src={src} alt={alt} />,
   }), [wrapWithHighlight]);

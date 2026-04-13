@@ -545,6 +545,10 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
       })),
     }),
   },
+  get_link_preview: {
+    method: 'GET',
+    path: (a) => `/api/link-preview?url=${encodeURIComponent(a.url as string)}`,
+  },
 
   // ==================== Feeds ====================
   list_feeds: {
