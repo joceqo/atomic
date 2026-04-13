@@ -549,6 +549,21 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
     method: 'GET',
     path: (a) => `/api/link-preview?url=${encodeURIComponent(a.url as string)}`,
   },
+  enqueue_link_screenshot: {
+    method: 'POST',
+    path: '/api/link-preview/screenshot',
+    argsMode: 'body',
+    transformArgs: (a) => ({ url: a.url }),
+  },
+  get_link_screenshot_job: {
+    method: 'GET',
+    path: (a) => `/api/link-preview/screenshot/${encodeURIComponent(a.jobId as string)}`,
+  },
+  get_link_screenshot_image: {
+    method: 'GET',
+    path: (a) => `/api/link-preview/screenshot/${encodeURIComponent(a.jobId as string)}/image`,
+    transformResponse: (d: unknown) => d,
+  },
 
   // ==================== Feeds ====================
   list_feeds: {

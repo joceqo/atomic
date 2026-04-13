@@ -7,6 +7,7 @@ pub mod auth;
 mod db_extractor;
 pub mod error;
 pub mod event_bridge;
+pub mod link_preview_queue;
 pub mod log_buffer;
 pub mod mcp;
 pub mod mcp_auth;

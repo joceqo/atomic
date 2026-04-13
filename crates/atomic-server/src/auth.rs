@@ -123,7 +123,13 @@ mod tests {
         );
         let (info, raw_token) = manager.registry().create_api_token("test-token").unwrap();
         let (event_tx, _) = broadcast::channel(16);
-        let state = web::Data::new(AppState { manager, event_tx, public_url: None });
+        let (link_preview_queue, _rx) = crate::link_preview_queue::LinkPreviewQueue::new(8);
+        let state = web::Data::new(AppState {
+            manager,
+            event_tx,
+            public_url: None,
+            link_preview_queue,
+        });
         // Leak the tempdir so the DB stays alive during the test
         std::mem::forget(temp);
         let _ = info;

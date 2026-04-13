@@ -262,8 +262,20 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/ingest/url", web::post().to(ingest::ingest_url));
     cfg.route("/ingest/urls", web::post().to(ingest::ingest_urls));
 
-    // Link preview (server-side fetch)
+    // Link preview (server-side metadata + queued screenshots)
     cfg.route("/link-preview", web::get().to(link_preview::get_link_preview));
+    cfg.route(
+        "/link-preview/screenshot",
+        web::post().to(link_preview::enqueue_link_screenshot),
+    );
+    cfg.route(
+        "/link-preview/screenshot/{job_id}",
+        web::get().to(link_preview::get_link_screenshot_status),
+    );
+    cfg.route(
+        "/link-preview/screenshot/{job_id}/image",
+        web::get().to(link_preview::get_link_screenshot_image),
+    );
 
     // Feeds
     cfg.route("/feeds", web::get().to(feeds::list_feeds));

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { getTransport } from '../../lib/transport';
 
 interface LinkPreviewData {
@@ -7,6 +7,17 @@ interface LinkPreviewData {
   description?: string | null;
   image?: string | null;
   site_name?: string | null;
+}
+
+interface ScreenshotEnqueueResponse {
+  job_id: string;
+  status: 'queued';
+}
+
+interface ScreenshotStatusResponse {
+  job_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error?: string | null;
 }
 
 interface LinkPreviewProps {
@@ -18,6 +29,9 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<LinkPreviewData | null>(null);
+  const [screenshotJob, setScreenshotJob] = useState<ScreenshotStatusResponse | null>(null);
+  const [screenshotImageUrl, setScreenshotImageUrl] = useState<string | null>(null);
+  const queuedForUrl = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isOpen || !url || data || loading) return;
@@ -28,10 +42,53 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
       .finally(() => setLoading(false));
   }, [isOpen, url, data, loading]);
 
+  useEffect(() => {
+    if (!isOpen || !url || !data || screenshotJob?.status === 'completed' || screenshotJob?.status === 'processing' || screenshotImageUrl || queuedForUrl.current === url) return;
+    let cancelled = false;
+    queuedForUrl.current = url;
+    getTransport()
+      .invoke<ScreenshotEnqueueResponse>('enqueue_link_screenshot', { url })
+      .then((job) => {
+        if (!cancelled) {
+          setScreenshotJob({ job_id: job.job_id, status: 'pending' });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setScreenshotJob({ job_id: '', status: 'failed', error: 'Failed to queue screenshot' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, url, data, screenshotJob?.status, screenshotImageUrl]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      queuedForUrl.current = null;
+      setScreenshotJob(null);
+      setScreenshotImageUrl(null);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !screenshotJob?.job_id || screenshotJob.status === 'completed' || screenshotJob.status === 'failed') return;
+    const timer = setInterval(() => {
+      getTransport()
+        .invoke<ScreenshotStatusResponse>('get_link_screenshot_status', { jobId: screenshotJob.job_id })
+        .then((next) => {
+          setScreenshotJob(next);
+          if (next.status === 'completed' && (next as any).image_data_url) {
+            setScreenshotImageUrl((next as any).image_data_url);
+          }
+        })
+        .catch(() => setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Polling failed' } : prev)));
+    }, 800);
+    return () => clearInterval(timer);
+  }, [isOpen, screenshotJob]);
+
   const displayTitle = data?.title?.trim() || url;
   const displayDescription = data?.description?.trim();
   const displaySite = data?.site_name?.trim();
-  const previewImage = data?.image?.trim();
+  const previewImage = screenshotImageUrl || data?.image?.trim();
   const fallbackHost = (() => {
     if (!data?.url) return '';
     try {

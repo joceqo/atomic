@@ -1,6 +1,7 @@
 //! Application state and server event types
 
 use crate::log_buffer::LogBuffer;
+use crate::link_preview_queue::LinkPreviewQueue;
 use atomic_core::{AtomicCore, DatabaseManager};
 use serde::Serialize;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ pub struct AppState {
     pub public_url: Option<String>,
     /// In-memory ring buffer for recent log lines (for user export)
     pub log_buffer: LogBuffer,
+    /// Async queue for link screenshot generation jobs.
+    pub link_preview_queue: LinkPreviewQueue,
 }
 
 impl AppState {

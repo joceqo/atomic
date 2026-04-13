@@ -7,10 +7,14 @@ mod config;
 
 use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer, Responder};
-use atomic_server::{auth, event_bridge, log_buffer::LogBuffer, mcp, mcp_auth, routes, state::AppState, ws, Scalar, Servable};
+use atomic_server::{
+    auth, event_bridge, link_preview_queue::start_link_preview_worker, log_buffer::LogBuffer, mcp,
+    mcp_auth, routes, state::AppState, ws, Scalar, Servable,
+};
 use utoipa::OpenApi;
 use clap::Parser;
 use config::{Cli, Command, TokenAction};
+use atomic_server::link_preview_queue::LinkPreviewQueue;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp_actix_web::transport::StreamableHttpService;
 use std::sync::Arc;
@@ -187,11 +191,15 @@ async fn run_server(
     // Create broadcast channel for WebSocket events (buffer 256 events)
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
 
+    let (link_preview_queue, link_preview_rx) = LinkPreviewQueue::new(256);
+    start_link_preview_worker(link_preview_queue.clone(), link_preview_rx);
+
     let app_state = web::Data::new(AppState {
         manager: Arc::clone(&manager),
         event_tx: event_tx.clone(),
         public_url: public_url.clone(),
         log_buffer,
+        link_preview_queue,
     });
 
     // Create MCP service with multi-database support via ?db= query param

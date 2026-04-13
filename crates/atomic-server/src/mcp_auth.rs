@@ -159,6 +159,7 @@ mod tests {
             manager,
             event_tx,
             public_url: public_url.map(String::from),
+            link_preview_queue: crate::link_preview_queue::LinkPreviewQueue::new(16).0,
         });
         std::mem::forget(temp);
         (state, raw_token)
