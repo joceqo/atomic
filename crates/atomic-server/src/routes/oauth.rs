@@ -582,10 +582,12 @@ mod tests {
             atomic_core::DatabaseManager::new(temp.path()).unwrap()
         );
         let (event_tx, _) = broadcast::channel::<ServerEvent>(16);
+        let (link_preview_queue, _rx) = crate::link_preview_queue::LinkPreviewQueue::new(1);
         let state = web::Data::new(AppState {
             manager,
             event_tx,
             public_url: Some("https://atomic.example.com".to_string()),
+            link_preview_queue,
         });
         std::mem::forget(temp);
         state
@@ -597,10 +599,12 @@ mod tests {
             atomic_core::DatabaseManager::new(temp.path()).unwrap()
         );
         let (event_tx, _) = broadcast::channel::<ServerEvent>(16);
+        let (link_preview_queue, _rx) = crate::link_preview_queue::LinkPreviewQueue::new(1);
         let state = web::Data::new(AppState {
             manager,
             event_tx,
             public_url: None,
+            link_preview_queue,
         });
         std::mem::forget(temp);
         state

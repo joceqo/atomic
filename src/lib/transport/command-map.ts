@@ -545,6 +545,31 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
       })),
     }),
   },
+  get_link_preview: {
+    method: 'GET',
+    path: (a) => `/api/link-preview?url=${encodeURIComponent(a.url as string)}`,
+  },
+  get_link_preview_proxy_image: {
+    method: 'GET',
+    path: (a) =>
+      `/api/link-preview/proxy-image?url=${encodeURIComponent(a.imageUrl as string)}&referer=${encodeURIComponent(a.refererUrl as string)}`,
+    transformResponse: (d: unknown) => d,
+  },
+  enqueue_link_screenshot: {
+    method: 'POST',
+    path: '/api/link-preview/screenshot',
+    argsMode: 'body',
+    transformArgs: (a) => ({ url: a.url }),
+  },
+  get_link_screenshot_job: {
+    method: 'GET',
+    path: (a) => `/api/link-preview/screenshot/${encodeURIComponent(a.jobId as string)}`,
+  },
+  get_link_screenshot_image: {
+    method: 'GET',
+    path: (a) => `/api/link-preview/screenshot/${encodeURIComponent(a.jobId as string)}/image`,
+    transformResponse: (d: unknown) => d,
+  },
 
   // ==================== Feeds ====================
   list_feeds: {

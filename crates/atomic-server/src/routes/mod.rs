@@ -11,6 +11,7 @@ pub mod embedding;
 pub mod feeds;
 pub mod graph;
 pub mod import;
+pub mod link_preview;
 pub mod logs;
 pub mod ingest;
 pub mod oauth;
@@ -260,6 +261,25 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     // Ingestion
     cfg.route("/ingest/url", web::post().to(ingest::ingest_url));
     cfg.route("/ingest/urls", web::post().to(ingest::ingest_urls));
+
+    // Link preview (server-side metadata + queued screenshots)
+    cfg.route("/link-preview", web::get().to(link_preview::get_link_preview));
+    cfg.route(
+        "/link-preview/proxy-image",
+        web::get().to(link_preview::get_link_preview_proxy_image),
+    );
+    cfg.route(
+        "/link-preview/screenshot",
+        web::post().to(link_preview::enqueue_link_preview_screenshot),
+    );
+    cfg.route(
+        "/link-preview/screenshot/{job_id}",
+        web::get().to(link_preview::get_link_preview_screenshot_status),
+    );
+    cfg.route(
+        "/link-preview/screenshot/{job_id}/image",
+        web::get().to(link_preview::get_link_preview_screenshot_image),
+    );
 
     // Feeds
     cfg.route("/feeds", web::get().to(feeds::list_feeds));

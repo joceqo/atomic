@@ -43,6 +43,8 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client (for OpenRouter proxy calls)
 reqwest = { version = "0.12", features = ["json"] }
+scraper = "0.24"
+url = "2.5"
 
 # MCP server
 rmcp = { version = "0.15", features = ["server", "macros", "transport-streamable-http-server"] }

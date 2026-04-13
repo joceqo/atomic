@@ -25,6 +25,10 @@ export class HttpTransport implements Transport {
     return this.config;
   }
 
+  resolveUrl(path: string): string {
+    return `${this.config.baseUrl}${path}`;
+  }
+
   async connect(): Promise<void> {
     if (!this.config.baseUrl) return;
     this.shouldReconnect = true;
@@ -214,8 +218,18 @@ export class HttpTransport implements Transport {
       throw errorMsg;
     }
 
-    // Some endpoints return no body (204 or empty)
     const contentType = resp.headers.get('content-type') ?? '';
+
+    // Binary image bodies (og proxy may use image/* or application/octet-stream)
+    if (
+      contentType.startsWith('image/')
+      || path.includes('/link-preview/proxy-image')
+      || path.includes('/link-preview/screenshot/')
+    ) {
+      return (await resp.blob()) as T;
+    }
+
+    // Some endpoints return no body (204 or empty)
     if (!contentType.includes('json')) {
       return undefined as T;
     }
