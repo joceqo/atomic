@@ -266,15 +266,15 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/link-preview", web::get().to(link_preview::get_link_preview));
     cfg.route(
         "/link-preview/screenshot",
-        web::post().to(link_preview::enqueue_link_screenshot),
+        web::post().to(link_preview::enqueue_link_preview_screenshot),
     );
     cfg.route(
         "/link-preview/screenshot/{job_id}",
-        web::get().to(link_preview::get_link_screenshot_status),
+        web::get().to(link_preview::get_link_preview_screenshot_status),
     );
     cfg.route(
         "/link-preview/screenshot/{job_id}/image",
-        web::get().to(link_preview::get_link_screenshot_image),
+        web::get().to(link_preview::get_link_preview_screenshot_image),
     );
 
     // Feeds

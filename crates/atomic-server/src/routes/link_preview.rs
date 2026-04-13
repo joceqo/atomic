@@ -41,89 +41,10 @@ pub struct LinkScreenshotStatusResponse {
 }
 
 pub async fn get_link_preview(query: web::Query<LinkPreviewQuery>) -> HttpResponse {
-    let parsed = match Url::parse(&query.url) {
-        Ok(url) => url,
-        Err(_) => {
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Invalid URL"
-            }))
-        }
-    };
-
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Only http/https URLs are allowed"
-        }));
+    match fetch_link_preview(&query.url).await {
+        Ok(preview) => HttpResponse::Ok().json(preview),
+        Err(error) => HttpResponse::BadGateway().json(serde_json::json!({ "error": error })),
     }
-
-    if let Some(host) = parsed.host_str() {
-        if is_forbidden_host(host) {
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "URL host is not allowed"
-            }));
-        }
-    }
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to build link preview HTTP client");
-            return HttpResponse::InternalServerError().finish();
-        }
-    };
-
-    let response = match client
-        .get(parsed.clone())
-        .header(
-            reqwest::header::USER_AGENT,
-            "AtomicLinkPreview/1.0 (+https://github.com/kenforthewin/atomic)",
-        )
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::debug!(error = %e, url = %parsed, "failed to fetch preview URL");
-            return HttpResponse::BadGateway().json(serde_json::json!({
-                "error": "Failed to fetch URL"
-            }));
-        }
-    };
-
-    if !response.status().is_success() {
-        return HttpResponse::BadGateway().json(serde_json::json!({
-            "error": format!("Remote server returned {}", response.status())
-        }));
-    }
-
-    let body = match response.text().await {
-        Ok(t) => t,
-        Err(_) => {
-            return HttpResponse::BadGateway().json(serde_json::json!({
-                "error": "Failed to read URL response body"
-            }));
-        }
-    };
-
-    let document = Html::parse_document(&body);
-    let title = first_meta_content(&document, "property", "og:title")
-        .or_else(|| first_text(&document, "title"));
-    let description = first_meta_content(&document, "property", "og:description")
-        .or_else(|| first_meta_content(&document, "name", "description"));
-    let image = first_meta_content(&document, "property", "og:image");
-    let site_name = first_meta_content(&document, "property", "og:site_name");
-
-    HttpResponse::Ok().json(LinkPreviewResponse {
-        url: parsed.to_string(),
-        title,
-        description,
-        image,
-        site_name,
-    })
 }
 
 pub async fn enqueue_link_preview_screenshot(
@@ -173,7 +94,7 @@ pub async fn get_link_preview_screenshot_status(
     match state.link_preview_queue.get(&job_id).await {
         Some(job) => HttpResponse::Ok().json(LinkScreenshotStatusResponse {
             job_id: job.id,
-            status: job.status.to_string(),
+            status: format!("{:?}", job.status).to_ascii_lowercase(),
             error: job.error,
         }),
         None => HttpResponse::NotFound().json(serde_json::json!({
@@ -188,7 +109,7 @@ pub async fn get_link_preview_screenshot_image(
 ) -> HttpResponse {
     let job_id = path.into_inner();
     match state.link_preview_queue.get(&job_id).await {
-        Some(job) => match (job.status, job.screenshot_jpeg_bytes) {
+        Some(job) => match (job.status, job.image_bytes) {
             (ScreenshotJobStatus::Completed, Some(bytes)) => {
                 HttpResponse::Ok().content_type("image/jpeg").body(bytes)
             }
@@ -242,19 +163,79 @@ fn is_private_ip(ip: IpAddr) -> bool {
 }
 
 fn is_private_ipv4(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    let is_doc_range = (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+        || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+        || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113);
     ip.is_private()
         || ip.is_loopback()
         || ip.is_link_local()
         || ip.is_broadcast()
-        || ip.is_documentation()
+        || is_doc_range
         || ip.is_unspecified()
         || ip.octets()[0] == 0
 }
 
 fn is_private_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    // 2001:db8::/32 documentation range
+    let is_doc_range = segments[0] == 0x2001 && segments[1] == 0x0db8;
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_unique_local()
         || ip.is_unicast_link_local()
-        || ip.is_documentation()
+        || is_doc_range
+}
+
+pub async fn fetch_link_preview(url: &str) -> Result<LinkPreviewResponse, String> {
+    let parsed = Url::parse(url).map_err(|_| "Invalid URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("Only http/https URLs are allowed".to_string());
+    }
+    if let Some(host) = parsed.host_str() {
+        if is_forbidden_host(host) {
+            return Err("URL host is not allowed".to_string());
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+
+    let response = client
+        .get(parsed.clone())
+        .header(
+            reqwest::header::USER_AGENT,
+            "AtomicLinkPreview/1.0 (+https://github.com/kenforthewin/atomic)",
+        )
+        .send()
+        .await
+        .map_err(|e| format!("failed to fetch URL: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Remote server returned {}", response.status()));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|_| "Failed to read URL response body".to_string())?;
+
+    let document = Html::parse_document(&body);
+    let title = first_meta_content(&document, "property", "og:title")
+        .or_else(|| first_text(&document, "title"));
+    let description = first_meta_content(&document, "property", "og:description")
+        .or_else(|| first_meta_content(&document, "name", "description"));
+    let image = first_meta_content(&document, "property", "og:image");
+    let site_name = first_meta_content(&document, "property", "og:site_name");
+
+    Ok(LinkPreviewResponse {
+        url: parsed.to_string(),
+        title,
+        description,
+        image,
+        site_name,
+    })
 }
