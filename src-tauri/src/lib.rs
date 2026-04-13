@@ -178,16 +178,16 @@ pub fn run() {
                 // Record PID so we can clean up after a crash
                 write_pid_file(&app_data_dir, child.pid());
 
-                // Log sidecar output
+                // Log sidecar (atomic-server) output at info so `npm run tauri dev` shows it without RUST_LOG=debug.
                 tauri::async_runtime::spawn(async move {
                     use tauri_plugin_shell::process::CommandEvent;
                     while let Some(event) = rx.recv().await {
                         match event {
                             CommandEvent::Stdout(line) => {
-                                tracing::debug!(output = %String::from_utf8_lossy(&line), "sidecar stdout");
+                                tracing::info!(target: "atomic_sidecar", "{}", String::from_utf8_lossy(&line).trim_end());
                             }
                             CommandEvent::Stderr(line) => {
-                                tracing::debug!(output = %String::from_utf8_lossy(&line), "sidecar stderr");
+                                tracing::info!(target: "atomic_sidecar", "{}", String::from_utf8_lossy(&line).trim_end());
                             }
                             CommandEvent::Terminated(payload) => {
                                 tracing::info!(?payload, "sidecar terminated");
@@ -227,6 +227,11 @@ pub fn run() {
                         }
                     }
                 }
+            }
+
+            #[cfg(debug_assertions)]
+            if let Some(win) = app.get_webview_window("main") {
+                win.open_devtools();
             }
 
             Ok(())

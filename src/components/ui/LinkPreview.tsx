@@ -25,6 +25,10 @@ interface LinkPreviewProps {
   children?: ReactNode;
 }
 
+const linkPreviewDebug = import.meta.env.DEV
+  ? (...args: unknown[]) => console.debug('[LinkPreview]', ...args)
+  : () => {};
+
 export function LinkPreview({ url, children }: LinkPreviewProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -37,8 +41,14 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
     if (!isOpen || !url || data || loading) return;
     setLoading(true);
     getTransport().invoke<LinkPreviewData>('get_link_preview', { url })
-      .then(setData)
-      .catch(() => setData(null))
+      .then((d) => {
+        linkPreviewDebug('metadata', url, d);
+        setData(d);
+      })
+      .catch((e) => {
+        linkPreviewDebug('metadata failed', url, e);
+        setData(null);
+      })
       .finally(() => setLoading(false));
   }, [isOpen, url, data, loading]);
 
@@ -49,11 +59,13 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
     getTransport()
       .invoke<ScreenshotEnqueueResponse>('enqueue_link_screenshot', { url })
       .then((job) => {
+        linkPreviewDebug('screenshot queued', url, job);
         if (!cancelled) {
           setScreenshotJob({ job_id: job.job_id, status: 'pending' });
         }
       })
-      .catch(() => {
+      .catch((e) => {
+        linkPreviewDebug('screenshot enqueue failed', url, e);
         if (!cancelled) setScreenshotJob({ job_id: '', status: 'failed', error: 'Failed to queue screenshot' });
       });
     return () => {
@@ -76,22 +88,28 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
       getTransport()
         .invoke<ScreenshotStatusResponse>('get_link_screenshot_status', { jobId })
         .then((next) => {
+          linkPreviewDebug('screenshot status', jobId, next);
           setScreenshotJob(next);
           if (next.status === 'completed') {
             clearInterval(timer);
             getTransport()
               .invoke<Blob>('get_link_screenshot_image', { jobId: next.job_id })
               .then((blob) => {
+                linkPreviewDebug('screenshot image blob', { jobId: next.job_id, size: blob.size, type: blob.type });
                 const objectUrl = URL.createObjectURL(blob);
                 setScreenshotImageUrl((prev) => {
                   if (prev) URL.revokeObjectURL(prev);
                   return objectUrl;
                 });
               })
-              .catch(() => setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Failed to load screenshot' } : prev)));
+              .catch((e) => {
+                linkPreviewDebug('screenshot image fetch failed', next.job_id, e);
+                setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Failed to load screenshot' } : prev));
+              });
           }
           if (next.status === 'failed') {
             clearInterval(timer);
+            linkPreviewDebug('screenshot job failed', next.error);
           }
         })
         .catch(() => setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Polling failed' } : prev)));
