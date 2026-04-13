@@ -11,7 +11,7 @@ interface LinkPreviewData {
 
 interface ScreenshotEnqueueResponse {
   job_id: string;
-  status: 'queued';
+  status: string;
 }
 
 interface ScreenshotStatusResponse {
@@ -29,13 +29,31 @@ const linkPreviewDebug = import.meta.env.DEV
   ? (...args: unknown[]) => console.debug('[LinkPreview]', ...args)
   : () => {};
 
+/** One enqueue per URL at a time — avoids N duplicate jobs when the same link appears in N markdown chunks. */
+const screenshotEnqueueInflight = new Map<string, Promise<ScreenshotEnqueueResponse>>();
+
+function enqueueScreenshotDeduped(url: string): Promise<ScreenshotEnqueueResponse> {
+  const existing = screenshotEnqueueInflight.get(url);
+  if (existing) {
+    linkPreviewDebug('screenshot enqueue deduped (shared in-flight)', url);
+    return existing;
+  }
+  const p = getTransport()
+    .invoke<ScreenshotEnqueueResponse>('enqueue_link_screenshot', { url })
+    .finally(() => {
+      screenshotEnqueueInflight.delete(url);
+    });
+  screenshotEnqueueInflight.set(url, p);
+  return p;
+}
+
 export function LinkPreview({ url, children }: LinkPreviewProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<LinkPreviewData | null>(null);
+  const [ogImageFailed, setOgImageFailed] = useState(false);
   const [screenshotJob, setScreenshotJob] = useState<ScreenshotStatusResponse | null>(null);
   const [screenshotImageUrl, setScreenshotImageUrl] = useState<string | null>(null);
-  const queuedForUrl = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isOpen || !url || data || loading) return;
@@ -53,11 +71,30 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
   }, [isOpen, url, data, loading]);
 
   useEffect(() => {
-    if (!isOpen || !url || !data || screenshotJob?.status === 'completed' || screenshotJob?.status === 'processing' || screenshotImageUrl || queuedForUrl.current === url) return;
+    if (!isOpen) {
+      setOgImageFailed(false);
+      setScreenshotJob(null);
+      setScreenshotImageUrl(null);
+    }
+  }, [isOpen]);
+
+  const needsScreenshot =
+    Boolean(data) &&
+    (!Boolean(data?.image?.trim()) || ogImageFailed) &&
+    !screenshotImageUrl;
+
+  useEffect(() => {
+    if (!isOpen || !url || !data || !needsScreenshot) return;
+    if (
+      screenshotJob?.status === 'pending'
+      || screenshotJob?.status === 'processing'
+      || screenshotJob?.status === 'completed'
+    ) {
+      return;
+    }
+
     let cancelled = false;
-    queuedForUrl.current = url;
-    getTransport()
-      .invoke<ScreenshotEnqueueResponse>('enqueue_link_screenshot', { url })
+    enqueueScreenshotDeduped(url)
       .then((job) => {
         linkPreviewDebug('screenshot queued', url, job);
         if (!cancelled) {
@@ -71,24 +108,19 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen, url, data, screenshotJob?.status, screenshotImageUrl]);
+  }, [isOpen, url, data, needsScreenshot, screenshotJob?.status, screenshotImageUrl]);
+
+  const pollJobId = screenshotJob?.job_id;
+  const pollTerminal = screenshotJob?.status === 'completed' || screenshotJob?.status === 'failed';
 
   useEffect(() => {
-    if (!isOpen) {
-      queuedForUrl.current = null;
-      setScreenshotJob(null);
-      setScreenshotImageUrl(null);
-    }
-  }, [isOpen]);
+    if (!isOpen || !pollJobId || pollTerminal) return;
 
-  useEffect(() => {
-    if (!isOpen || !screenshotJob?.job_id || screenshotJob.status === 'completed' || screenshotJob.status === 'failed') return;
-    const jobId = screenshotJob.job_id;
     const timer = setInterval(() => {
       getTransport()
-        .invoke<ScreenshotStatusResponse>('get_link_screenshot_status', { jobId })
+        .invoke<ScreenshotStatusResponse>('get_link_screenshot_status', { jobId: pollJobId })
         .then((next) => {
-          linkPreviewDebug('screenshot status', jobId, next);
+          linkPreviewDebug('screenshot status', pollJobId, next);
           setScreenshotJob(next);
           if (next.status === 'completed') {
             clearInterval(timer);
@@ -114,13 +146,21 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
         })
         .catch(() => setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Polling failed' } : prev)));
     }, 800);
+
     return () => clearInterval(timer);
-  }, [isOpen, screenshotJob]);
+  }, [isOpen, pollJobId, pollTerminal]);
+
+  useEffect(() => {
+    return () => {
+      if (screenshotImageUrl) URL.revokeObjectURL(screenshotImageUrl);
+    };
+  }, [screenshotImageUrl]);
 
   const displayTitle = data?.title?.trim() || url;
   const displayDescription = data?.description?.trim();
   const displaySite = data?.site_name?.trim();
-  const previewImage = screenshotImageUrl || data?.image?.trim();
+  const ogSrc = data?.image?.trim() && !ogImageFailed ? data.image.trim() : null;
+  const previewImage = screenshotImageUrl || ogSrc;
   const fallbackHost = (() => {
     if (!data?.url) return '';
     try {
@@ -152,6 +192,12 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
                   alt=""
                   className="mb-2 h-36 w-full rounded object-cover border border-[var(--color-border)]"
                   loading="lazy"
+                  onError={() => {
+                    if (ogSrc && previewImage === ogSrc) {
+                      linkPreviewDebug('og:image failed to load in browser, will try server screenshot', ogSrc);
+                      setOgImageFailed(true);
+                    }
+                  }}
                 />
               )}
               <span className="block text-sm font-medium text-[var(--color-text-primary)] line-clamp-2">
