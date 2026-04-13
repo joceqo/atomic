@@ -71,13 +71,27 @@ export function LinkPreview({ url, children }: LinkPreviewProps) {
 
   useEffect(() => {
     if (!isOpen || !screenshotJob?.job_id || screenshotJob.status === 'completed' || screenshotJob.status === 'failed') return;
+    const jobId = screenshotJob.job_id;
     const timer = setInterval(() => {
       getTransport()
-        .invoke<ScreenshotStatusResponse>('get_link_screenshot_status', { jobId: screenshotJob.job_id })
+        .invoke<ScreenshotStatusResponse>('get_link_screenshot_status', { jobId })
         .then((next) => {
           setScreenshotJob(next);
-          if (next.status === 'completed' && (next as any).image_data_url) {
-            setScreenshotImageUrl((next as any).image_data_url);
+          if (next.status === 'completed') {
+            clearInterval(timer);
+            getTransport()
+              .invoke<Blob>('get_link_screenshot_image', { jobId: next.job_id })
+              .then((blob) => {
+                const objectUrl = URL.createObjectURL(blob);
+                setScreenshotImageUrl((prev) => {
+                  if (prev) URL.revokeObjectURL(prev);
+                  return objectUrl;
+                });
+              })
+              .catch(() => setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Failed to load screenshot' } : prev)));
+          }
+          if (next.status === 'failed') {
+            clearInterval(timer);
           }
         })
         .catch(() => setScreenshotJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Polling failed' } : prev)));
